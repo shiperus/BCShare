@@ -16,11 +16,10 @@ import com.shiperus.ark.bcshare.receiver.WifiStateChangeReceiver
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.io.*
+import java.lang.Exception
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.coroutines.CoroutineContext
-import java.nio.file.Files.exists
-import kotlin.concurrent.fixedRateTimer
 
 
 class ReceiverActivity :
@@ -32,12 +31,22 @@ class ReceiverActivity :
 //        finish()
     }
 
-    override fun onConnectedWifiMatchAppSSIDPrefix() {}
+    override fun onConnectedWifiMatchAppSSIDPrefix() {
+        if (!isWifiFinallyConnected) {
+            isWifiFinallyConnected = true
+            launch {
+                delay(4000)
+                sendRequestToServer(pathUrl + CONNECT_URL)
+            }
+        }
+    }
 
     override fun onWifiStateChanged() {
-        if (allowCheckWifiStatus) {
-            Toast.makeText(this, "Lost Connection To Host", Toast.LENGTH_SHORT).show()
-            finish()
+        launch {
+            if (isWifiFinallyConnected) {
+                Toast.makeText(this@ReceiverActivity, "Lost Connection To Host", Toast.LENGTH_SHORT).show()
+                finish()
+            }
         }
     }
 
@@ -45,7 +54,6 @@ class ReceiverActivity :
     val REFRESH_FILE_URL = "/getFiles"
     val DOWNLOAD_FILE_URL = "/downloadFiles/"
     val CONNECT_URL = "/connect"
-
 
 
     lateinit var scrollViewAvailableFiles: ScrollView
@@ -56,7 +64,7 @@ class ReceiverActivity :
     lateinit var wifiStateChangeReceiver: WifiStateChangeReceiver
     private lateinit var wifiManager: WifiManager
     override val coroutineContext: CoroutineContext = Dispatchers.Main
-    var allowCheckWifiStatus = false
+    var isWifiFinallyConnected = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,12 +72,6 @@ class ReceiverActivity :
         pathUrl = intent.extras["formattedPathUrl"].toString()
         wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         initView()
-        GlobalScope.launch {
-            delay(2000)
-            allowCheckWifiStatus = true
-            sendRequestToServer(pathUrl + CONNECT_URL)
-        }
-
     }
 
     override fun onResume() {
@@ -105,33 +107,43 @@ class ReceiverActivity :
             withContext(Dispatchers.Default) {
                 response = sendRequestToServer(pathUrl + REFRESH_FILE_URL)
             }
-            val jsonObjectResponse = JSONObject(response)
-            val jsonArrayServedFiles = jsonObjectResponse.getJSONArray("data")
-            delay(2000)
-            if (jsonArrayServedFiles.length() == 0) {
-                showTextViewNoAvailableFiles()
-            } else {
-                linearLayoutAvailableFiles.removeAllViews()
-                for (idx in 0 until jsonArrayServedFiles.length()) {
-                    val viewAvailableFileItem = layoutInflater
-                            .inflate(
-                                    R.layout.layout_available_file_item,
-                                    linearLayoutAvailableFiles,
-                                    false
-                            )
-                    val textViewFileName: TextView = viewAvailableFileItem.findViewById(R.id.tv_file_name)
-                    val buttonDownload: Button = viewAvailableFileItem.findViewById(R.id.btn_download_file)
-                    val servedFile = File(jsonArrayServedFiles.getString(idx))
-                    textViewFileName.text = servedFile.name
-                    buttonDownload.setOnClickListener {
-                        val downloadPath = pathUrl + DOWNLOAD_FILE_URL + idx
-                        val uriDownloadPath = Uri.parse(downloadPath)
-                        postDownloadRequestToDM(uriDownloadPath, "")
-                        Toast.makeText(this@ReceiverActivity, "Downloading " + servedFile.name, Toast.LENGTH_SHORT).show()
+            try {
+                val jsonObjectResponse = JSONObject(response)
+                val jsonArrayServedFiles = jsonObjectResponse.getJSONArray("data")
+                delay(2000)
+                if (jsonArrayServedFiles.length() == 0) {
+                    showTextViewNoAvailableFiles()
+                } else {
+                    linearLayoutAvailableFiles.removeAllViews()
+                    for (idx in 0 until jsonArrayServedFiles.length()) {
+                        val viewAvailableFileItem = layoutInflater
+                                .inflate(
+                                        R.layout.layout_available_file_item,
+                                        linearLayoutAvailableFiles,
+                                        false
+                                )
+                        val textViewFileName: TextView = viewAvailableFileItem.findViewById(R.id.tv_file_name)
+                        val buttonDownload: Button = viewAvailableFileItem.findViewById(R.id.btn_download_file)
+                        val servedFile = File(jsonArrayServedFiles.getString(idx))
+                        textViewFileName.text = servedFile.name
+                        buttonDownload.setOnClickListener {
+                            val downloadPath = pathUrl + DOWNLOAD_FILE_URL + idx
+                            val uriDownloadPath = Uri.parse(downloadPath)
+                            postDownloadRequestToDM(uriDownloadPath, "")
+                            Toast.makeText(this@ReceiverActivity, "Downloading " + servedFile.name, Toast.LENGTH_SHORT).show()
+                        }
+                        linearLayoutAvailableFiles.addView(viewAvailableFileItem)
                     }
-                    linearLayoutAvailableFiles.addView(viewAvailableFileItem)
+                    showScrollViewAvailableFiles()
                 }
+            } catch (e: Exception) {
+                Toast.makeText(
+                        this@ReceiverActivity,
+                        "There was a problem, please try again",
+                        Toast.LENGTH_SHORT
+                ).show()
                 showScrollViewAvailableFiles()
+                e.printStackTrace()
             }
         }
     }
@@ -154,6 +166,9 @@ class ReceiverActivity :
             `is` = conn.inputStream
             // Convert the InputStream into a string
             readIt(`is`)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            ""
         } finally {
             `is`?.close()
         }

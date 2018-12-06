@@ -1,6 +1,7 @@
 package com.shiperus.ark.bcshare.ui
 
 import android.content.*
+import android.os.Build
 import android.support.v7.app.AppCompatActivity
 import android.os.Bundle
 import android.os.Environment
@@ -23,7 +24,14 @@ class SendActivity :
         AppCompatActivity(),
         BCShareService.BCShareServiceCallback,
         DialogSelectionListener,
-        BCShareService.ClientListUpdated{
+        BCShareService.ClientListUpdated {
+    override fun onWifiApStarted() {
+        textViewSSIDName.text = "SSID Name : ${bcShareService?.getSSIDName()}"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            textViewSSIDKEY.text = "SSID Key : ${bcShareService?.getHotspotKeyForOreo()}"
+        }
+    }
+
     override fun onClientListUpdated(arrayListClient: ArrayList<String>) {
         runOnUiThread {
             textViewTotalConnectedDevice.text = "${arrayListClient.size} devices connected"
@@ -38,6 +46,8 @@ class SendActivity :
     private lateinit var scrollViewAddedFileList: ScrollView
     private lateinit var linearLayoutAddedFile: LinearLayout
     private lateinit var addedFileList: ArrayList<String>
+    private lateinit var textViewSSIDName: TextView
+    private lateinit var textViewSSIDKEY: TextView
 
     override fun onSelectedFilePaths(files: Array<String>) {
         if (!files.isEmpty()) {
@@ -104,6 +114,8 @@ class SendActivity :
     }
 
     private fun initView() {
+        textViewSSIDName = findViewById(R.id.tv_ssid_name)
+        textViewSSIDKEY = findViewById(R.id.tv_ssid_key)
         buttonAddFiles = findViewById(R.id.btn_add_file_to_be_served)
         textViewNoFileAdded = findViewById(R.id.tv_no_file_added)
         textViewTotalConnectedDevice = findViewById(R.id.tv_total_connected_device)

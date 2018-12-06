@@ -6,6 +6,7 @@ import android.content.IntentFilter
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.support.v7.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Base64
@@ -15,19 +16,19 @@ import android.widget.*
 import com.shiperus.ark.bcshare.R
 import com.shiperus.ark.bcshare.receiver.WifiScanReceiver
 import com.shiperus.ark.bcshare.receiver.WifiStateChangeReceiver
-import com.shiperus.ark.bcshare.receiver.WifiStateChangeReceiver.Companion.APP_HOTSPOT_PREFIX
 import com.shiperus.ark.bcshare.util.MobileHotspot
+import com.shiperus.ark.bcshare.util.MobileHotspot.Companion.APP_HOTSPOT_OREO_PREFIX
 import kotlinx.coroutines.*
-import java.io.*
-import java.net.HttpURLConnection
+import java.lang.Exception
 import java.net.InetAddress
-import java.net.URL
 import java.nio.charset.Charset
+import kotlin.coroutines.CoroutineContext
 
 class AvailableHotspotActivity :
         AppCompatActivity(),
         WifiScanReceiver.WifiScanCallback,
-        WifiStateChangeReceiver.WifiStateChangeCallback {
+        WifiStateChangeReceiver.WifiStateChangeCallback,
+        CoroutineScope {
     lateinit var scrollViewAvailableWifi: ScrollView
     lateinit var linearLayoutAvailableWifi: LinearLayout
     lateinit var linearLayoutProgressBar: LinearLayout
@@ -38,6 +39,9 @@ class AvailableHotspotActivity :
     lateinit var wifiStateChangeReceiver: WifiStateChangeReceiver
     private lateinit var wifiManager: WifiManager
     private var isWifiCheckable: Boolean = false
+    val PATH_PREFIX_URL = "http://%s:%s"
+    var isConnectByUser = false
+    override val coroutineContext = Dispatchers.Main
 
     override fun onWifiScanComplete(wifiScanResults: ArrayList<ScanResult>) {
         linearLayoutAvailableWifi.removeAllViews()
@@ -47,14 +51,7 @@ class AvailableHotspotActivity :
                 showTextViewNoAvailableWifi()
             } else {
                 for (scanResult in wifiScanResults) {
-                    val decodedHotspotSSID: String = try {
-                        String(
-                                Base64.decode(scanResult.SSID.toByteArray(), Base64.DEFAULT),
-                                Charset.defaultCharset()
-                        )
-                    } catch (e: Exception) {
-                        scanResult.SSID
-                    }
+                    val decodedHotspotSSID = MobileHotspot.decodeHotspotSSID(scanResult.SSID)
                     val viewAvailableWifiItem = layoutInflater.inflate(
                             R.layout.layout_available_wifi_item,
                             linearLayoutAvailableWifi,
@@ -62,27 +59,49 @@ class AvailableHotspotActivity :
                     )
                     val textViewSSID: TextView = viewAvailableWifiItem.findViewById(R.id.tv_ssid)
                     val btnConnectWifi: Button = viewAvailableWifiItem.findViewById(R.id.btn_connect_wifi)
-                    textViewSSID.text = decodedHotspotSSID.split('_')[1]
+                    val editTextSSIDKey: EditText = viewAvailableWifiItem.findViewById(R.id.et_oreo_ssid_key)
+                    editTextSSIDKey.visibility = View.GONE
+                    if (decodedHotspotSSID.startsWith(APP_HOTSPOT_OREO_PREFIX)) {
+                        editTextSSIDKey.visibility = View.VISIBLE
+                    }
+                    textViewSSID.text = if (decodedHotspotSSID.startsWith(APP_HOTSPOT_OREO_PREFIX)) {
+                        decodedHotspotSSID
+                    } else {
+                        decodedHotspotSSID.split('_')[1]
+                    }
                     btnConnectWifi.setOnClickListener {
-                        isConnectByUser = true
-                        showProgressBarLoading()
-                        val wifiConfiguration = WifiConfiguration()
-                        wifiConfiguration.SSID = "\"" + scanResult.SSID + "\""
-                        wifiConfiguration.status = WifiConfiguration.Status.ENABLED
-                        wifiConfiguration.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE)
-                        val networkId = wifiManager.addNetwork(wifiConfiguration)
-                        GlobalScope.launch(Dispatchers.Main) {
-                            wifiManager.isWifiEnabled = true
-                            delay(3000)
-                            wifiManager.disconnect()
-                            wifiManager.enableNetwork(networkId, true)
-                            wifiManager.reconnect()
-                        }
+                        val ssidKey = editTextSSIDKey.text.toString()
+                        connectToWifi(scanResult.SSID, ssidKey)
                     }
                     linearLayoutAvailableWifi.addView(viewAvailableWifiItem)
                 }
                 showScrollViewAvailableWifi()
             }
+        }
+    }
+
+    private fun connectToWifi(ssidName: String, ssidKey: String) {
+        isConnectByUser = true
+        showProgressBarLoading()
+        val wifiConfiguration = WifiConfiguration()
+        wifiConfiguration.SSID = "\"" + ssidName + "\""
+        wifiConfiguration.status = WifiConfiguration.Status.ENABLED
+        if (ssidName.startsWith(APP_HOTSPOT_OREO_PREFIX)) {
+            if (ssidKey.isEmpty()) {
+                Toast.makeText(this, "Please Input Key", Toast.LENGTH_SHORT).show()
+                return
+            }
+            wifiConfiguration.preSharedKey = "\"" + ssidKey + "\""
+        } else {
+            wifiConfiguration.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE)
+        }
+        val networkId = wifiManager.addNetwork(wifiConfiguration)
+        GlobalScope.launch(Dispatchers.Main) {
+            wifiManager.isWifiEnabled = true
+            delay(3000)
+            wifiManager.disconnect()
+            wifiManager.enableNetwork(networkId, true)
+            wifiManager.reconnect()
         }
     }
 
@@ -93,10 +112,15 @@ class AvailableHotspotActivity :
         finish()
     }
 
-    override fun onWifiStateChanged() {}
-
-    val PATH_PREFIX_URL = "http://%s:%s"
-    var isConnectByUser = false
+    override fun onWifiStateChanged() {
+        launch {
+            if (isConnectByUser) {
+                Toast.makeText(this@AvailableHotspotActivity, "Can't Connect To Wifi", Toast.LENGTH_SHORT).show()
+                showScrollViewAvailableWifi()
+                isConnectByUser = false
+            }
+        }
+    }
 
     override fun onConnectedWifiMatchAppSSIDPrefix() {
         if (isConnectByUser) {
@@ -145,6 +169,7 @@ class AvailableHotspotActivity :
         val intentFilterStateChangeReceiver = IntentFilter()
         intentFilterStateChangeReceiver.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
         intentFilterStateChangeReceiver.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
+        intentFilterStateChangeReceiver.addAction(WifiManager.SUPPLICANT_STATE_CHANGED_ACTION)
         registerReceiver(wifiStateChangeReceiver, intentFilterStateChangeReceiver)
     }
 

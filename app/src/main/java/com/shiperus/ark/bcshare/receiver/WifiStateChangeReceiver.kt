@@ -8,24 +8,30 @@ import android.util.Base64
 import android.util.Log
 import java.nio.charset.Charset
 import android.net.wifi.SupplicantState
+import com.shiperus.ark.bcshare.util.MobileHotspot
+import com.shiperus.ark.bcshare.util.MobileHotspot.Companion.APP_HOTSPOT_OREO_PREFIX
+import com.shiperus.ark.bcshare.util.MobileHotspot.Companion.APP_HOTSPOT_PREFIX
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.*
+import kotlin.concurrent.fixedRateTimer
+import kotlin.coroutines.CoroutineContext
 
 
-class WifiStateChangeReceiver(val wifiManager: WifiManager, val context: Context) : BroadcastReceiver() {
-    //    private var isScanFromUser: Boolean = false
-//    var wifiScanCallback: WifiScanCallback? = null
+class WifiStateChangeReceiver(val wifiManager: WifiManager, val context: Context) :
+        BroadcastReceiver() {
     interface WifiStateChangeCallback {
         fun onWifiDisabled()
         fun onConnectedWifiMatchAppSSIDPrefix()
         fun onWifiStateChanged()
     }
 
-    companion object {
-        val APP_HOTSPOT_PREFIX = "BC" + Character.toString(26.toChar())
-    }
-
     var wifiStateChangeCallback: WifiStateChangeCallback? = null
-
-    override fun onReceive(p0: Context?, p1: Intent) {
+    var timerTimeoutWifiConnectionFailed: Timer? = null
+    override fun onReceive(p0: Context?, intent: Intent) {
+        timerTimeoutWifiConnectionFailed?.cancel()
         if (wifiManager.wifiState == WifiManager.WIFI_STATE_DISABLED) {
             wifiStateChangeCallback?.onWifiDisabled()
         } else {
@@ -33,25 +39,22 @@ class WifiStateChangeReceiver(val wifiManager: WifiManager, val context: Context
             val supState = info.supplicantState
             if (isBcShareSSID(wifiManager.connectionInfo.ssid) && supState == SupplicantState.COMPLETED) {
                 wifiStateChangeCallback?.onConnectedWifiMatchAppSSIDPrefix()
-            }else{
-                wifiStateChangeCallback?.onWifiStateChanged()
+            } else {
+                timerTimeoutWifiConnectionFailed = fixedRateTimer(
+                        "delayBeforeConnectionFailed",
+                        false,
+                        2000,
+                        1) {
+                    wifiStateChangeCallback?.onWifiStateChanged()
+                    timerTimeoutWifiConnectionFailed?.cancel()
+                }
             }
         }
     }
 
     private fun isBcShareSSID(ssid: String): Boolean {
-        val decodedHotspotSSID: String = try {
-            String(
-                    Base64.decode(ssid.toByteArray(), Base64.DEFAULT),
-                    Charset.defaultCharset()
-            )
-        } catch (e: Exception) {
-            ssid
-        }
-        return decodedHotspotSSID.startsWith(APP_HOTSPOT_PREFIX)
+        val decodedHotspotSSID = MobileHotspot.decodeHotspotSSID(ssid)
+        return decodedHotspotSSID.startsWith(APP_HOTSPOT_PREFIX) || decodedHotspotSSID.startsWith(APP_HOTSPOT_OREO_PREFIX)
     }
 
-//    fun setScanFromUser(){
-//        this.isScanFromUser = true
-//    }
 }

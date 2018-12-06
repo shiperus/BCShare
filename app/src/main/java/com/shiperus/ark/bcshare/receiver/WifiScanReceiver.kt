@@ -8,27 +8,23 @@ import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.util.Base64
 import android.util.Log
-import com.shiperus.ark.bcshare.receiver.WifiStateChangeReceiver.Companion.APP_HOTSPOT_PREFIX
+import com.shiperus.ark.bcshare.util.MobileHotspot
+import com.shiperus.ark.bcshare.util.MobileHotspot.Companion.APP_HOTSPOT_OREO_PREFIX
+import com.shiperus.ark.bcshare.util.MobileHotspot.Companion.APP_HOTSPOT_PREFIX
 import java.nio.charset.Charset
 
-class WifiScanReceiver(val wifiManager: WifiManager): BroadcastReceiver() {
+class WifiScanReceiver(val wifiManager: WifiManager) : BroadcastReceiver() {
     private var isScanFromUser: Boolean = false
     var wifiScanCallback: WifiScanCallback? = null
 
     override fun onReceive(p0: Context?, p1: Intent?) {
-        if(!isScanFromUser)
+        if (!isScanFromUser)
             return
         val wifiScanResults: ArrayList<ScanResult> = ArrayList()
-        for(scanResult in wifiManager.scanResults){
-            val decodedHotspotSSID: String = try {
-                String(
-                        Base64.decode(scanResult.SSID.toByteArray(), Base64.DEFAULT),
-                        Charset.defaultCharset()
-                )
-            } catch (e: Exception) {
-                scanResult.SSID
-            }
-            if (!decodedHotspotSSID.startsWith(APP_HOTSPOT_PREFIX))
+        for (scanResult in wifiManager.scanResults) {
+            val decodedHotspotSSID = MobileHotspot.decodeHotspotSSID(scanResult.SSID)
+            if (!decodedHotspotSSID.startsWith(APP_HOTSPOT_PREFIX) &&
+                    !decodedHotspotSSID.startsWith(APP_HOTSPOT_OREO_PREFIX))
                 continue
             wifiScanResults.add(scanResult)
         }
@@ -37,12 +33,11 @@ class WifiScanReceiver(val wifiManager: WifiManager): BroadcastReceiver() {
     }
 
 
-
-    interface WifiScanCallback{
+    interface WifiScanCallback {
         fun onWifiScanComplete(wifiScanResults: ArrayList<ScanResult>)
     }
 
-    fun setScanFromUser(){
+    fun setScanFromUser() {
         this.isScanFromUser = true
     }
 }

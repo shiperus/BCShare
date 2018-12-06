@@ -6,11 +6,12 @@ import android.os.Binder
 import android.os.IBinder
 import com.shiperus.ark.bcshare.server.BCShareServer
 import com.shiperus.ark.bcshare.util.MobileHotspot
+import kotlinx.coroutines.*
 import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.concurrent.fixedRateTimer
 
-class BCShareService : Service() {
+class BCShareService : Service(),CoroutineScope {
     private val iBinder = BCShareServiceBinder()
     private lateinit var mobileHotspot: MobileHotspot
     private lateinit var bcShareServer: BCShareServer
@@ -18,9 +19,11 @@ class BCShareService : Service() {
     var clientListUpdated: ClientListUpdated? = null
     private lateinit var fixedRateTimerHotspotAvailable: Timer
     private lateinit var fixedRateTimerConnectedClient: Timer
+    override val coroutineContext = Dispatchers.Default
 
     interface BCShareServiceCallback {
         fun onWifiApTurnOff()
+        fun onWifiApStarted()
     }
 
     interface ClientListUpdated {
@@ -47,16 +50,30 @@ class BCShareService : Service() {
     }
 
     fun startMobileHotspot() {
-        if (!mobileHotspot.isWifiApEnabled())
+        launch {
+            mobileHotspot.disableMobileHotspot()
             mobileHotspot.enableMobileHotspot()
-        try {
-            bcShareServer = BCShareServer(MobileHotspot.PORT)
-            bcShareServer.start()
-        } catch (e: java.lang.Exception) {
-            e.printStackTrace()
+            delay(2000)
+            try {
+                bcShareServer = BCShareServer(MobileHotspot.PORT)
+                bcShareServer.start()
+            } catch (e: java.lang.Exception) {
+                e.printStackTrace()
+            }
+            detectIfMobileHotspotStillAvailable()
+            detectConnectedClient()
+            withContext(Dispatchers.Main){
+                bcShareServiceCallback?.onWifiApStarted()
+            }
         }
-        detectIfMobileHotspotStillAvailable()
-        detectConnectedClient()
+    }
+
+    fun getSSIDName():String{
+        return mobileHotspot.hotspotSSID
+    }
+
+    fun getHotspotKeyForOreo():String{
+        return mobileHotspot.hotspotKeyForOreo
     }
 
     private fun detectIfMobileHotspotStillAvailable() {
@@ -68,7 +85,7 @@ class BCShareService : Service() {
     }
 
     fun detectConnectedClient() {
-        fixedRateTimerConnectedClient = fixedRateTimer("getConnectedClient",false,0,1000){
+        fixedRateTimerConnectedClient = fixedRateTimer("getConnectedClient", false, 0, 1000) {
             clientListUpdated?.onClientListUpdated(bcShareServer.getConnectedClient())
         }
     }
